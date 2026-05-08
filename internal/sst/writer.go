@@ -27,6 +27,10 @@ func NewWriter(file *os.File, hashNumber int, bitsPerKey int) *Writer {
 	}
 }
 
+func (w *Writer) Name() string {
+	return w.file.Name()
+}
+
 func (w *Writer) Add(key string, val []byte) error {
 	var header [RecordHeaderSize]byte
 

@@ -9,33 +9,6 @@ import (
 	"github.io/MikhailProg/lsm-tree-db/internal/sst"
 )
 
-func compact(sstWriter *sst.Writer, ssts []*sst.Reader) error {
-	iterators := make([]base.Iterator[string, []byte], len(ssts))
-	for i := range ssts {
-		iterators[i] = sst.NewIterator(ssts[i])
-	}
-
-	mi := base.NewMergeIterator(iterators)
-
-	for ; mi.Valid(); mi.Next() {
-		key, val := mi.Key(), mi.Value()
-		if err := sstWriter.Add(key, val); err != nil {
-			return fmt.Errorf("sst writer add key %s: %w", key, err)
-		}
-
-	}
-
-	if mi.Err() != nil {
-		return mi.Err()
-	}
-
-	return sstWriter.Flush()
-}
-
-func (l *LSM) genSSTFilename(fileIndex int) string {
-	return filepath.Join(l.config.DbDir, fmt.Sprintf(sstFilenameFormat, fileIndex))
-}
-
 func (l *LSM) compactLoop() {
 	for {
 		select {
@@ -49,9 +22,10 @@ func (l *LSM) compactLoop() {
 		l.RUnlock()
 
 		if compact {
-			if err := l.RunCompaction(); err != nil {
+			if err := l.compactOnce(); err != nil {
 				panic(fmt.Errorf("critical error at compaction: %v", err))
 			}
+
 			l.Lock()
 			{
 				close(l.compactDone)
@@ -69,78 +43,128 @@ func (l *LSM) wakeCompaction() {
 	}
 }
 
-func (l *LSM) RunCompaction() error {
-	var ssts []*sst.Reader
+func mergeData(sstWriter *sst.Writer, sstReaders []*sst.Reader) error {
+	iters := make([]base.Iterator[string, []byte], len(sstReaders))
+
+	for i, r := range sstReaders {
+		iters[i] = sst.NewIterator(r)
+	}
+
+	mi := base.NewMergeIterator(iters)
+
+	for ; mi.Valid(); mi.Next() {
+		key, val := mi.Key(), mi.Value()
+
+		if err := sstWriter.Add(key, val); err != nil {
+			return fmt.Errorf(
+				"sst writer add key %s to %s: %w", key, sstWriter.Name(), err)
+		}
+	}
+
+	if mi.Err() != nil {
+		return mi.Err()
+	}
+
+	return sstWriter.Flush()
+}
+
+func (l *LSM) genSSTFilename(fileIndex int) string {
+	return filepath.Join(l.config.DbDir, fmt.Sprintf(sstFilenameFormat, fileIndex))
+}
+
+func (l *LSM) prepareCompaction() ([]*sst.Reader, int) {
+	var sstReaders []*sst.Reader
 
 	fileIndex := 0
 	l.Lock()
 	{
 		if len(l.readers) < 2 {
 			l.Unlock()
-			return nil
+			return nil, 0
 		}
 
-		ssts = make([]*sst.Reader, 0, len(l.readers))
+		sstReaders = make([]*sst.Reader, 0, len(l.readers))
 		for i := len(l.readers) - 1; i >= 0; i-- {
-			ssts = append(ssts, l.readers[i])
+			sstReaders = append(sstReaders, l.readers[i])
 		}
+
 		l.fileIndex++
 		fileIndex = l.fileIndex
 	}
 	l.Unlock()
 
-	sstfilename := l.genSSTFilename(fileIndex)
-	newsstfilename := sstfilename + ".new"
+	return sstReaders, fileIndex
+}
 
-	sstFile, err := os.Create(newsstfilename)
+func (l *LSM) doCompact(sstReaders []*sst.Reader, fileIndex int) (*sst.Reader, error) {
+	sstPath := l.genSSTFilename(fileIndex)
+	sstPathNew := sstPath + ".new"
+
+	sstFile, err := os.Create(sstPathNew)
 	if err != nil {
-		return fmt.Errorf("create %s: %w", newsstfilename, err)
+		return nil, fmt.Errorf("create %s: %w", sstPathNew, err)
 	}
 
 	w := sst.NewWriter(sstFile, l.config.HashNumber, l.config.BitsPerKey)
 
-	if err := compact(w, ssts); err != nil {
-		sstFile.Close()
-		os.Remove(newsstfilename)
-		return fmt.Errorf("compact to new sst %s: %w", newsstfilename, err)
+	if err := mergeData(w, sstReaders); err != nil {
+		_ = w.Close()
+		_ = os.Remove(w.Name())
+		return nil, fmt.Errorf("compact to new sst %s: %w", w.Name(), err)
 	}
 
-	// Close() method flush and close
 	if err := w.Close(); err != nil {
-		os.Remove(newsstfilename)
-		return fmt.Errorf("close flushed sst %s: %w", newsstfilename, err)
+		_ = os.Remove(w.Name())
+		return nil, fmt.Errorf("close flushed sst %s: %w", w.Name(), err)
 	}
 
-	if err := os.Rename(newsstfilename, sstfilename); err != nil {
-		return fmt.Errorf("rename %s to %s", newsstfilename, sstfilename)
+	if err := os.Rename(sstPathNew, sstPath); err != nil {
+		return nil, fmt.Errorf("rename %s to %s", sstPathNew, sstPath)
 	}
 
-	// Reopen for reading
-	sstFile, err = os.Open(sstfilename)
+	sstFile, err = os.Open(sstPath)
 	if err != nil {
-		os.Remove(sstfilename)
-		return fmt.Errorf("open file for reading %s: %w", sstfilename, err)
+		_ = os.Remove(sstPath)
+		return nil, fmt.Errorf("open file for reading %s: %w", sstPath, err)
 	}
 
 	r := sst.NewReader(sstFile)
 	if err := r.LoadMetadata(); err != nil {
-		sstFile.Close()
-		os.Remove(sstfilename)
-		return fmt.Errorf("create reader: %w", err)
+		_ = r.Close()
+		_ = os.Remove(r.Name())
+		return nil, fmt.Errorf("load data from sst reader %s: %w", r.Name(), err)
 	}
 
+	return r, nil
+}
+
+func (l *LSM) updateSSTReaders(r *sst.Reader, sstReaders []*sst.Reader) {
 	l.Lock()
 	{
-		for i := range len(ssts) {
+		for i := range len(sstReaders) {
 			l.readers[i] = nil
 		}
-		l.readers = append([]*sst.Reader{r}, l.readers[len(ssts):]...)
+		l.readers = append([]*sst.Reader{r}, l.readers[len(sstReaders):]...)
 	}
 	l.Unlock()
+}
 
-	for i := range ssts {
-		ssts[i].Close()
-		os.Remove(ssts[i].Name())
+func (l *LSM) compactOnce() error {
+	sstReaders, fileIndex := l.prepareCompaction()
+	if sstReaders == nil {
+		return nil
+	}
+
+	r, err := l.doCompact(sstReaders, fileIndex)
+	if err != nil {
+		return err
+	}
+
+	l.updateSSTReaders(r, sstReaders)
+
+	for _, r := range sstReaders {
+		_ = r.Close()
+		_ = os.Remove(r.Name())
 	}
 
 	return nil
