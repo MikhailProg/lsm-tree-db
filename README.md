@@ -1,11 +1,11 @@
 # LSM-Tree Key-Value Storage Engine
 
-It is a pet project under 2.5k locs. A key-value storage engine implemented, based on the **LSM-tree (Log-Structured Merge-Tree)** architecture. This project implements concepts used in modern NoSQL databases (LevelDB).
+It is a pet project. A lightweight (under 2.5k LOC) key-value storage engine implemented, based on the **LSM-tree (Log-Structured Merge-Tree)** architecture. This project implements concepts used in modern NoSQL databases (LevelDB).
 
 ## Core Features
 
 ### 1. In-Memory Storage (MemTable)
-*   **Generic SkipList**: In-memory storage with $O(\log N)$ complexity for search and insertion.
+*   **SkipList**: In-memory storage with $O(\log N)$ complexity for search and insertion.
 *   **WAL (Write-Ahead Log)**: Ensures durability by logging operations before applying them. Uses **CRC32 checksums** to detect data corruption during crashes.
 
 ### 2. Disk Persistence (SSTable)
