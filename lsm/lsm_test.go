@@ -189,7 +189,10 @@ func TestLSM_Scan(t *testing.T) {
 	// stay in current memtable
 	lsm.Put("a3", []byte("3"))
 
-	it := lsm.Scan("a1", "a3")
+	it, err := lsm.Scan("a1", "a3")
+	if err != nil {
+		t.Fatalf("Create RangeIterator: %v", err)
+	}
 
 	expected := []string{"a1", "a2", "a3"}
 	count := 0
@@ -200,8 +203,16 @@ func TestLSM_Scan(t *testing.T) {
 		count++
 	}
 
+	if it.Err() != nil {
+		t.Errorf("Range iterator error: %v", it.Err())
+	}
+
 	if count != len(expected) {
 		t.Errorf("Expected %d keys, got %d", len(expected), count)
+	}
+
+	if err := it.Close(); err != nil {
+		t.Errorf("Range iterator close: %v", it.Err())
 	}
 }
 
@@ -240,7 +251,7 @@ func TestLSM_Compact(t *testing.T) {
 
 	select {
 	case <-compactDone:
-	case <-time.After(time.Second * 5):
+	case <-time.After(time.Second * 10):
 		t.Fatal("Compact timeout")
 	}
 

@@ -54,18 +54,18 @@ func TestMemTable_TotalSize(t *testing.T) {
 	mt := New(f, testMaxLevel)
 
 	mt.Put("k", []byte("v")) // 1+1=2
-	if mt.totalSize != 2 {
-		t.Errorf("expected size 2, got %d", mt.totalSize)
+	if mt.Size() != 2 {
+		t.Errorf("expected size 2, got %d", mt.Size())
 	}
 
 	mt.Put("k", []byte("vvv")) // 1+3=4
-	if mt.totalSize != 4 {
-		t.Errorf("expected size 4, got %d", mt.totalSize)
+	if mt.Size() != 4 {
+		t.Errorf("expected size 4, got %d", mt.Size())
 	}
 
 	mt.Delete("k") // 1 (key) + 0 (nil val) = 1
-	if mt.totalSize != 1 {
-		t.Errorf("expected size 1, got %d", mt.totalSize)
+	if mt.Size() != 1 {
+		t.Errorf("expected size 1, got %d", mt.Size())
 	}
 }
 
@@ -90,7 +90,7 @@ func TestMemTable_Recover(t *testing.T) {
 		t.Errorf("recovered data mismatch: got %s, ok %v", string(val), ok)
 	}
 
-	if mt2.totalSize != mt1.totalSize {
-		t.Errorf("recovered size mismatch: expected %d, got %d", mt1.totalSize, mt2.totalSize)
+	if mt2.Size() != mt1.Size() {
+		t.Errorf("recovered size mismatch: expected %d, got %d", mt1.Size(), mt2.Size())
 	}
 }

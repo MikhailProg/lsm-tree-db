@@ -65,6 +65,10 @@ func mergeData(sstWriter *sst.Writer, sstReaders []*sst.Reader) error {
 		return mi.Err()
 	}
 
+	if err := mi.Close(); err != nil {
+		return err
+	}
+
 	return sstWriter.Flush()
 }
 
@@ -72,10 +76,10 @@ func (l *LSM) genSSTFilename(fileIndex int) string {
 	return filepath.Join(l.config.DbDir, fmt.Sprintf(sstFilenameFormat, fileIndex))
 }
 
-func (l *LSM) prepareCompaction() ([]*sst.Reader, int) {
+func (l *LSM) prepareCompact() ([]*sst.Reader, int) {
 	var sstReaders []*sst.Reader
+	var fileIndex int
 
-	fileIndex := 0
 	l.Lock()
 	{
 		if len(l.readers) < 2 {
@@ -88,8 +92,7 @@ func (l *LSM) prepareCompaction() ([]*sst.Reader, int) {
 			sstReaders = append(sstReaders, l.readers[i])
 		}
 
-		l.fileIndex++
-		fileIndex = l.fileIndex
+		fileIndex = int(l.fileIndex.Add(1))
 	}
 	l.Unlock()
 
@@ -128,20 +131,24 @@ func (l *LSM) doCompact(sstReaders []*sst.Reader, fileIndex int) (*sst.Reader, e
 		return nil, fmt.Errorf("open file for reading %s: %w", sstPath, err)
 	}
 
-	r := sst.NewReader(sstFile)
-	if err := r.LoadMetadata(); err != nil {
-		_ = r.Close()
-		_ = os.Remove(r.Name())
-		return nil, fmt.Errorf("load data from sst reader %s: %w", r.Name(), err)
+	sstReader := sst.NewReader(sstFile)
+	if err := sstReader.LoadMetadata(); err != nil {
+		_, _ = sstReader.UnRef()
+		_ = os.Remove(sstReader.Name())
+		return nil, fmt.Errorf(
+			"load data from sst reader %s: %w", sstReader.Name(), err)
 	}
 
-	return r, nil
+	return sstReader, nil
 }
 
 func (l *LSM) updateSSTReaders(r *sst.Reader, sstReaders []*sst.Reader) {
 	l.Lock()
 	{
-		for i := range len(sstReaders) {
+		for i := 0; i < len(sstReaders); i++ {
+			if sstReaders[len(sstReaders)-i-1] != l.readers[i] {
+				panic("SST readers must be equal")
+			}
 			l.readers[i] = nil
 		}
 		l.readers = append([]*sst.Reader{r}, l.readers[len(sstReaders):]...)
@@ -150,21 +157,26 @@ func (l *LSM) updateSSTReaders(r *sst.Reader, sstReaders []*sst.Reader) {
 }
 
 func (l *LSM) compactOnce() error {
-	sstReaders, fileIndex := l.prepareCompaction()
+	sstReaders, fileIndex := l.prepareCompact()
 	if sstReaders == nil {
 		return nil
 	}
 
-	r, err := l.doCompact(sstReaders, fileIndex)
+	sstReader, err := l.doCompact(sstReaders, fileIndex)
 	if err != nil {
 		return err
 	}
 
-	l.updateSSTReaders(r, sstReaders)
+	l.updateSSTReaders(sstReader, sstReaders)
 
-	for _, r := range sstReaders {
-		_ = r.Close()
-		_ = os.Remove(r.Name())
+	for _, sstReader := range sstReaders {
+		sstReader.OnRelease(func() error {
+			if err := sstReader.Close(); err != nil {
+				return err
+			}
+			return os.Remove(sstReader.Name())
+		})
+		_, _ = sstReader.UnRef()
 	}
 
 	return nil

@@ -2,11 +2,15 @@ package lsm
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.io/MikhailProg/lsm-tree-db/internal/memtable"
 	"github.io/MikhailProg/lsm-tree-db/internal/wal"
 )
+
+// seq := l.nextSeq.Add(1)
+// err = l.current.Put(seq, req.key, req.val)
 
 func (l *LSM) writeLoop() {
 	for {
@@ -15,10 +19,13 @@ func (l *LSM) writeLoop() {
 			return
 		case req := <-l.writeQueue:
 			l.RLock()
-			rotate := l.current.GetTotalSize() >= l.config.MaxMemTableSize
+			tableSize := l.current.Size()
+			needRotate :=
+				req.op == typeRotate && tableSize > 0 ||
+					tableSize >= l.config.MaxMemTableSize
 			l.RUnlock()
 
-			if rotate {
+			if needRotate {
 				// request a token from the semaphore
 				select {
 				case <-l.ctx.Done():
@@ -33,15 +40,17 @@ func (l *LSM) writeLoop() {
 				l.wakeFlusher()
 			}
 
-			l.Lock()
 			var err error
-			if req.val != nil {
-				err = l.current.Put(req.key, req.val)
-			} else {
-				err = l.current.Delete(req.key)
+			if req.op != typeRotate {
+				l.Lock()
+				switch req.op {
+				case typeAdd:
+					err = l.current.Put(req.key, req.val)
+				case typeDel:
+					err = l.current.Delete(req.key)
+				}
+				l.Unlock()
 			}
-			l.Unlock()
-
 			req.errCh <- err
 		}
 	}
@@ -51,20 +60,26 @@ func (l *LSM) genWALFilename(fileIndex int) string {
 	return filepath.Join(l.config.DbDir, fmt.Sprintf(walFilenameFormat, fileIndex))
 }
 
-func (l *LSM) rotateMemTable() error {
-	walfilename := l.genWALFilename(l.fileIndex + 1)
-	wal, err := wal.WALOpenFile(walfilename)
+func (l *LSM) openWAL(fileIndex int) (*os.File, error) {
+	walPath := l.genWALFilename(fileIndex)
+	wal, err := wal.WALOpenFile(walPath)
 	if err != nil {
-		return fmt.Errorf("create file %s: %w", walfilename, err)
+		return nil, fmt.Errorf("create file %s: %w", walPath, err)
+	}
+	return wal, nil
+}
+
+func (l *LSM) rotateMemTable() error {
+	walFile, err := l.openWAL(int(l.fileIndex.Add(1)))
+	if err != nil {
+		return err
 	}
 
 	l.Lock()
-	{
-		l.frozen = append(l.frozen, l.current)
-		l.current = memtable.New(wal, l.config.MaxMemTableLevel)
-		l.fileIndex++
-	}
-	l.Unlock()
+	defer l.Unlock()
+
+	l.frozen = append(l.frozen, l.current)
+	l.current = memtable.New(walFile, l.config.MaxMemTableLevel)
 
 	return nil
 }

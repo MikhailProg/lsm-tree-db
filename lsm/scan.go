@@ -6,14 +6,16 @@ import (
 	"github.io/MikhailProg/lsm-tree-db/internal/sst"
 )
 
-// It's not safe since compaction can close SSTs, need to add Ref() over sst.Reader
-func (l *LSM) Scan(startKey, endKey string) *RangeIterator {
-	l.RLock()
-	defer l.RUnlock()
+func (l *LSM) Scan(startKey, endKey string) (*RangeIterator, error) {
+	// Wait till the current table becomes frozen
+	if err := l.Rotate(); err != nil {
+		return nil, err
+	}
 
-	var iters []base.Iterator[string, []byte]
-
-	iters = append(iters, memtable.NewIterator(l.current))
+	l.Lock()
+	// Make a snapshot, iterators call Ref() for each table
+	iters := make(
+		[]base.Iterator[string, []byte], 0, len(l.frozen)+len(l.readers))
 
 	for i := len(l.frozen) - 1; i >= 0; i-- {
 		iters = append(iters, memtable.NewIterator(l.frozen[i]))
@@ -23,7 +25,9 @@ func (l *LSM) Scan(startKey, endKey string) *RangeIterator {
 		iters = append(iters, sst.NewIterator(l.readers[i]))
 	}
 
+	l.Unlock()
+
 	mi := base.NewMergeIterator(iters)
 
-	return NewRangeIterator(mi, startKey, endKey)
+	return NewRangeIterator(mi, startKey, endKey), nil
 }

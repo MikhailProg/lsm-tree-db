@@ -10,6 +10,7 @@ type Iterator struct {
 }
 
 func NewIterator(r *Reader) *Iterator {
+	r.Ref()
 	it := &Iterator{reader: r}
 	it.updateKey()
 	return it
@@ -68,5 +69,6 @@ func (it *Iterator) Err() error {
 }
 
 func (it *Iterator) Close() error {
-	return nil
+	_, err := it.reader.UnRef()
+	return err
 }

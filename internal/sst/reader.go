@@ -8,17 +8,24 @@ import (
 	"os"
 	"sort"
 
+	"github.io/MikhailProg/lsm-tree-db/internal/base"
 	"github.io/MikhailProg/lsm-tree-db/internal/bloom"
 )
 
 type Reader struct {
+	base.RefCount
 	file  *os.File
 	index []IndexRecord
 	bloom *bloom.CRC64
 }
 
 func NewReader(file *os.File) *Reader {
-	return &Reader{file: file}
+	r := &Reader{file: file}
+	r.Init()
+	r.OnRelease(func() error {
+		return r.Close()
+	})
+	return r
 }
 
 func (r *Reader) Name() string {

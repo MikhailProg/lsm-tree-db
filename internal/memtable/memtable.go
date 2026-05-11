@@ -4,30 +4,31 @@ import (
 	"os"
 	"sync"
 
+	"github.io/MikhailProg/lsm-tree-db/internal/base"
 	"github.io/MikhailProg/lsm-tree-db/internal/skiplist"
 	"github.io/MikhailProg/lsm-tree-db/internal/wal"
 )
 
 type MemTable struct {
 	sync.RWMutex
-	list      *skiplist.SkipList[string, []byte]
-	wal       *wal.WAL
-	totalSize int64
-}
-
-type Iterator struct {
-	*skiplist.Iterator[string, []byte]
+	base.RefCount
+	list *skiplist.SkipList[string, []byte]
+	wal  *wal.WAL
+	size int64
 }
 
 func New(file *os.File, maxLevel int) *MemTable {
-	return &MemTable{
+	m := &MemTable{
 		wal:  wal.New(file),
 		list: skiplist.New[string, []byte](maxLevel),
 	}
-}
 
-func NewIterator(m *MemTable) *Iterator {
-	return &Iterator{Iterator: skiplist.NewIterator(m.list)}
+	m.Init()
+	m.OnRelease(func() error {
+		return m.Close()
+	})
+
+	return m
 }
 
 func (m *MemTable) Name() string {
@@ -47,7 +48,7 @@ func (m *MemTable) Reset() error {
 	}
 
 	m.list = skiplist.New[string, []byte](m.list.MaxLevel())
-	m.totalSize = 0
+	m.size = 0
 	return nil
 }
 
@@ -57,23 +58,23 @@ func (m *MemTable) apply(op wal.EntryType, key string, val []byte) {
 
 	if op == wal.EntryTypeAdd {
 		if !exist {
-			m.totalSize += int64(len(key) + len(val))
+			m.size += int64(len(key) + len(val))
 		} else {
-			m.totalSize += int64(len(val) - len(oldVal))
+			m.size += int64(len(val) - len(oldVal))
 		}
 	} else {
 		if !exist {
-			m.totalSize += int64(len(key))
+			m.size += int64(len(key))
 		} else {
-			m.totalSize -= int64(len(oldVal))
+			m.size -= int64(len(oldVal))
 		}
 	}
 }
 
-func (m *MemTable) GetTotalSize() int64 {
+func (m *MemTable) Size() int64 {
 	m.RLock()
 	defer m.RUnlock()
-	return m.totalSize
+	return m.size
 }
 
 func (m *MemTable) Put(key string, data []byte) error {

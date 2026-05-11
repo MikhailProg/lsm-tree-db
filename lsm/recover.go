@@ -54,17 +54,17 @@ func (l *LSM) recoverSSTFromWAL(sstPath string) (*sst.Reader, error) {
 	table := memtable.New(walFile, l.config.MaxMemTableLevel)
 
 	if err := table.Recover(); err != nil {
-		table.Close()
+		_, _ = table.UnRef()
 		return nil, fmt.Errorf("recover wal %s: %w", table.Name(), err)
 	}
 
-	r, err := l.flushToSST(table)
+	sstReader, err := l.flushToSST(table)
 	if err != nil {
-		table.Close()
+		_, _ = table.UnRef()
 		return nil, fmt.Errorf("flush recovered sst %s: %w", table.Name(), err)
 	}
 
-	if err := table.Close(); err != nil {
+	if _, err := table.UnRef(); err != nil {
 		return nil, fmt.Errorf("close wal after recovery %s: %w", table.Name(), err)
 	}
 
@@ -72,7 +72,7 @@ func (l *LSM) recoverSSTFromWAL(sstPath string) (*sst.Reader, error) {
 	_ = os.Remove(table.Name())
 	_ = os.Remove(sstPathBad)
 
-	return r, nil
+	return sstReader, nil
 }
 
 func (l *LSM) loadSSTs() error {
@@ -89,20 +89,21 @@ func (l *LSM) loadSSTs() error {
 			return fmt.Errorf("open sst %s: %w", sstPath, err)
 		}
 
-		r := sst.NewReader(sstFile)
+		sstReader := sst.NewReader(sstFile)
 
-		if err := r.LoadMetadata(); err != nil {
-			if err := r.Close(); err != nil {
-				return fmt.Errorf("close sst %s: %s", sstPath, err)
+		if err := sstReader.LoadMetadata(); err != nil {
+			ok, err := sstReader.UnRef()
+			if !ok || err != nil {
+				return fmt.Errorf("close sst %s: %s", sstReader.Name(), err)
 			}
 
-			r, err = l.recoverSSTFromWAL(sstPath)
+			sstReader, err = l.recoverSSTFromWAL(sstPath)
 			if err != nil {
 				return fmt.Errorf("recover sst from wal %s: %s", sstPath, err)
 			}
 		}
 
-		l.readers = append(l.readers, r)
+		l.readers = append(l.readers, sstReader)
 	}
 
 	return nil
@@ -138,20 +139,19 @@ func (l *LSM) loadWALs() error {
 
 		r, err := l.flushToSST(table)
 		if err != nil {
-			table.Close()
+			_, _ = table.UnRef()
 			return fmt.Errorf("flush wal to sst %s: %w", table.Name(), err)
 		}
 
 		l.readers = append(l.readers, r)
 
 		// Pretend it is not crucial
-		_ = table.Close()
+		_, _ = table.UnRef()
 		if len(walPathBad) > 0 {
 			if err := os.Rename(table.Name(), walPathBad); err != nil {
 				return fmt.Errorf(
 					"rename %s to %s: %w", table.Name(), walPathBad, err)
 			}
-
 		} else {
 			_ = os.Remove(table.Name())
 		}
@@ -178,12 +178,11 @@ func (l *LSM) Load() error {
 		maxSSTNum = numberFromName(l.readers[len(l.readers)-1].Name())
 	}
 
-	l.fileIndex = maxSSTNum + 1
+	l.fileIndex.Store(int32(maxSSTNum + 1))
 
-	walPath := l.genWALFilename(l.fileIndex)
-	walFile, err := wal.WALOpenFile(walPath)
+	walFile, err := l.openWAL(int(l.fileIndex.Load()))
 	if err != nil {
-		return fmt.Errorf("create file %s: %w", walPath, err)
+		return err
 	}
 
 	l.current = memtable.New(walFile, l.config.MaxMemTableLevel)

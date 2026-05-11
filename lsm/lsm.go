@@ -3,7 +3,9 @@ package lsm
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
+	"sync/atomic"
 
 	"github.io/MikhailProg/lsm-tree-db/internal/memtable"
 	"github.io/MikhailProg/lsm-tree-db/internal/sst"
@@ -15,7 +17,17 @@ const (
 	sstFilenameFormat = filenameFormat + ".sst"
 )
 
+type reqType byte
+
+const (
+	typeUnknown reqType = iota
+	typeAdd
+	typeDel
+	typeRotate
+)
+
 type putReq struct {
+	op    reqType
 	key   string
 	val   []byte
 	errCh chan error
@@ -37,7 +49,7 @@ type LSM struct {
 	current        *memtable.MemTable
 	frozen         []*memtable.MemTable
 	readers        []*sst.Reader
-	fileIndex      int
+	fileIndex      atomic.Int32
 	writeQueue     chan *putReq
 	flushSemFrozen chan struct{}
 	flushDone      chan struct{}
@@ -92,10 +104,15 @@ func New(config Config, ctx context.Context) *LSM {
 }
 
 func Open(config Config, ctx context.Context) (*LSM, error) {
+	if err := os.MkdirAll(config.DbDir, 0755); err != nil {
+		return nil, err
+	}
+
 	lsm := New(config, ctx)
 	if err := lsm.Load(); err != nil {
 		return nil, err
 	}
+
 	lsm.Start()
 	return lsm, nil
 }
@@ -135,17 +152,41 @@ func (l *LSM) Start() {
 
 func (l *LSM) Get(key string) ([]byte, bool, error) {
 	l.RLock()
-	defer l.RUnlock()
+	current := l.current
+	current.Ref()
 
-	if r, ok := l.current.Get(key); ok {
+	frozen := make([]*memtable.MemTable, len(l.frozen))
+	copy(frozen, l.frozen)
+	for _, f := range frozen {
+		f.Ref()
+	}
+
+	readers := make([]*sst.Reader, len(l.readers))
+	copy(readers, l.readers)
+	for _, r := range readers {
+		r.Ref()
+	}
+	l.RUnlock()
+
+	defer func() {
+		current.UnRef()
+		for _, f := range frozen {
+			f.UnRef()
+		}
+		for _, r := range readers {
+			r.UnRef()
+		}
+	}()
+
+	if r, ok := current.Get(key); ok {
 		if r == nil {
 			return nil, false, nil
 		}
 		return r, true, nil
 	}
 
-	for i := len(l.frozen) - 1; i >= 0; i-- {
-		if r, ok := l.frozen[i].Get(key); ok {
+	for i := len(frozen) - 1; i >= 0; i-- {
+		if r, ok := frozen[i].Get(key); ok {
 			if r == nil {
 				return nil, false, nil
 			}
@@ -153,8 +194,8 @@ func (l *LSM) Get(key string) ([]byte, bool, error) {
 		}
 	}
 
-	for i := len(l.readers) - 1; i >= 0; i-- {
-		r, ok, err := l.readers[i].Get(key)
+	for i := len(readers) - 1; i >= 0; i-- {
+		r, ok, err := readers[i].Get(key)
 		if err != nil {
 			return nil, false, err
 		}
@@ -169,9 +210,9 @@ func (l *LSM) Get(key string) ([]byte, bool, error) {
 	return nil, false, nil
 }
 
-func (l *LSM) sendReq(key string, val []byte) error {
+func (l *LSM) sendReq(op reqType, key string, val []byte) error {
 	req := l.reqPool.Get().(*putReq)
-	req.key, req.val = key, val
+	req.op, req.key, req.val = op, key, val
 
 	select {
 	case <-l.ctx.Done():
@@ -186,7 +227,7 @@ func (l *LSM) sendReq(key string, val []byte) error {
 	case err = <-req.errCh:
 	}
 
-	req.key, req.val = "", nil
+	req.op, req.key, req.val = typeUnknown, "", nil
 	l.reqPool.Put(req)
 
 	return err
@@ -196,9 +237,13 @@ func (l *LSM) Put(key string, val []byte) error {
 	if val == nil {
 		return fmt.Errorf("nil slice reserved for db tombstone")
 	}
-	return l.sendReq(key, val)
+	return l.sendReq(typeAdd, key, val)
 }
 
 func (l *LSM) Delete(key string) error {
-	return l.sendReq(key, nil)
+	return l.sendReq(typeDel, key, nil)
+}
+
+func (l *LSM) Rotate() error {
+	return l.sendReq(typeRotate, "", nil)
 }

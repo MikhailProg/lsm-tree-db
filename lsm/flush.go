@@ -51,23 +51,28 @@ func (l *LSM) flushFrozen() bool {
 	}
 	l.RUnlock()
 
-	r, err := l.flushToSST(table)
+	sstReader, err := l.flushToSST(table)
 	if err != nil {
 		panic(fmt.Errorf("critical error at flushing: %v", err))
 	}
-
-	// Pretend it's not crucial at table rotation
-	_ = table.Close()
-	_ = os.Remove(table.Name())
 
 	l.Lock()
 	{
 		copy(l.frozen, l.frozen[1:])
 		l.frozen[len(l.frozen)-1] = nil
 		l.frozen = l.frozen[:len(l.frozen)-1]
-		l.readers = append(l.readers, r)
+		l.readers = append(l.readers, sstReader)
 	}
 	l.Unlock()
+
+	table.OnRelease(func() error {
+		if err := table.Close(); err != nil {
+			return err
+		}
+		return os.Remove(table.Name())
+	})
+	// Pretend it's not crucial
+	_, _ = table.UnRef()
 
 	return true
 }
@@ -80,56 +85,75 @@ func wal2sst(wal string) string {
 	return strings.TrimSuffix(wal, ".wal") + ".sst"
 }
 
-func (l *LSM) flushToSST(table *memtable.MemTable) (*sst.Reader, error) {
-	sstfilename := wal2sst(table.Name())
-	newsstfilename := sstfilename + ".new"
+func (l *LSM) doFlushToSST(table *memtable.MemTable) (string, error) {
+	sstPath := wal2sst(table.Name())
+	sstPathNew := sstPath + ".new"
 
-	sstFile, err := os.Create(newsstfilename)
+	sstFile, err := os.Create(sstPathNew)
 	if err != nil {
-		return nil, fmt.Errorf("create %s: %w", newsstfilename, err)
+		return "", fmt.Errorf("create %s: %w", sstPathNew, err)
 	}
 
-	w := sst.NewWriter(sstFile, l.config.HashNumber, l.config.BitsPerKey)
+	sstWriter := sst.NewWriter(sstFile, l.config.HashNumber, l.config.BitsPerKey)
 
-	for it := memtable.NewIterator(table); it.Valid(); it.Next() {
+	sstWriterClean := func() {
+		_ = sstWriter.Close()
+		_ = os.Remove(sstWriter.Name())
+	}
+
+	it := memtable.NewIterator(table)
+
+	for ; it.Valid(); it.Next() {
 		key, val := it.Key(), it.Value()
-		if err := w.Add(key, val); err != nil {
-			w.Close()
-			os.Remove(newsstfilename)
-			return nil, err
+		if err := sstWriter.Add(key, val); err != nil {
+			sstWriterClean()
+			return "", err
 		}
 	}
 
-	if err := w.Flush(); err != nil {
-		os.Remove(newsstfilename)
-		return nil, fmt.Errorf("flush sst %s: %w", newsstfilename, err)
+	if it.Err() != nil {
+		sstWriterClean()
+		return "", it.Err()
 	}
 
-	if err := w.Close(); err != nil {
-		os.Remove(newsstfilename)
-		return nil, fmt.Errorf("close flushed sst %s: %w", newsstfilename, err)
+	if err := sstWriter.Flush(); err != nil {
+		sstWriterClean()
+		return "", fmt.Errorf("flush sst %s: %w", sstWriter.Name(), err)
 	}
 
-	if err := os.Rename(newsstfilename, sstfilename); err != nil {
-		os.Remove(newsstfilename)
-		return nil, fmt.Errorf("rename %s to %s", newsstfilename, sstfilename)
+	if err := sstWriter.Close(); err != nil {
+		_ = os.Remove(sstWriter.Name())
+		return "", fmt.Errorf("close flushed sst %s: %w", sstWriter.Name(), err)
 	}
 
-	// Reopen for reading
-	sstFile, err = os.Open(sstfilename)
+	if err := os.Rename(sstPathNew, sstPath); err != nil {
+		_ = os.Remove(sstPathNew)
+		return "", fmt.Errorf("rename %s to %s", sstPathNew, sstPath)
+	}
+
+	return sstPath, nil
+}
+
+func (l *LSM) flushToSST(table *memtable.MemTable) (*sst.Reader, error) {
+	sstPath, err := l.doFlushToSST(table)
 	if err != nil {
-		os.Remove(sstfilename)
-		return nil, fmt.Errorf("open file for reading %s: %w", sstfilename, err)
+		return nil, err
 	}
 
-	r := sst.NewReader(sstFile)
-	if err := r.LoadMetadata(); err != nil {
-		sstFile.Close()
-		os.Remove(sstfilename)
-		return nil, fmt.Errorf("create reader: %w", err)
+	sstFile, err := os.Open(sstPath)
+	if err != nil {
+		_ = os.Remove(sstPath)
+		return nil, fmt.Errorf("open file for reading %s: %w", sstPath, err)
 	}
 
-	return r, nil
+	sstReader := sst.NewReader(sstFile)
+	if err := sstReader.LoadMetadata(); err != nil {
+		_, _ = sstReader.UnRef()
+		_ = os.Remove(sstReader.Name())
+		return nil, fmt.Errorf("load reader %s: %w", sstReader.Name(), err)
+	}
+
+	return sstReader, nil
 }
 
 func (l *LSM) wakeFlusher() {
