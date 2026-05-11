@@ -153,8 +153,16 @@ func (l *LSM) Start() {
 
 func (l *LSM) Get(key string) ([]byte, bool, error) {
 	l.RLock()
-	current := l.current
-	current.Ref()
+	// Check the current table under lock if the key is not there
+	// create a snapshot Ref() from frozen memtables and ssts
+	if r, ok := l.current.Get(key); ok {
+		l.RUnlock()
+		// tomstone
+		if r == nil {
+			return nil, false, nil
+		}
+		return r, true, nil
+	}
 
 	frozen := make([]*memtable.MemTable, len(l.frozen))
 	copy(frozen, l.frozen)
@@ -170,7 +178,6 @@ func (l *LSM) Get(key string) ([]byte, bool, error) {
 	l.RUnlock()
 
 	defer func() {
-		current.UnRef()
 		for _, f := range frozen {
 			f.UnRef()
 		}
@@ -179,15 +186,11 @@ func (l *LSM) Get(key string) ([]byte, bool, error) {
 		}
 	}()
 
-	if r, ok := current.Get(key); ok {
-		if r == nil {
-			return nil, false, nil
-		}
-		return r, true, nil
-	}
-
+	// Lookup a key, nil value in memtables and ssts is a tombstone,
+	//  if it's found the key is deleted so return it's not in lsm
 	for i := len(frozen) - 1; i >= 0; i-- {
 		if r, ok := frozen[i].Get(key); ok {
+			// tombstone
 			if r == nil {
 				return nil, false, nil
 			}
@@ -201,6 +204,7 @@ func (l *LSM) Get(key string) ([]byte, bool, error) {
 			return nil, false, err
 		}
 		if ok {
+			// tombstone
 			if r == nil {
 				return nil, false, nil
 			}

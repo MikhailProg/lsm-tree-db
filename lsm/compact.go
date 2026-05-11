@@ -18,10 +18,10 @@ func (l *LSM) compactLoop() {
 		}
 
 		l.RLock()
-		compact := len(l.readers) >= l.config.SSTCompactThreshold
+		needCompact := len(l.readers) >= l.config.SSTCompactThreshold
 		l.RUnlock()
 
-		if compact {
+		if needCompact {
 			if err := l.compactOnce(); err != nil {
 				panic(fmt.Errorf("critical error at compaction: %v", err))
 			}
