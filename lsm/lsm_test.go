@@ -368,6 +368,24 @@ func TestLSM_ScanRefUnref(t *testing.T) {
 		}
 	}
 
+	for round := 1; round <= len(rangeIters); round++ {
+		ri := rangeIters[round-1]
+		for i := 1; i <= round; i++ {
+			expKey := fmt.Sprintf("a%d", i)
+			if ri.Key() != expKey {
+				t.Errorf("Expected key %s, got %s", expKey, ri.Key())
+			}
+			expVal := []byte(fmt.Sprintf("value%d", i))
+			if !bytes.Equal(ri.Value(), expVal) {
+				t.Errorf("Expected val %s, got %s", string(expVal), string(ri.Value()))
+			}
+			ri.Next()
+		}
+		if ri.Valid() {
+			t.Error("RangeIterator should be Invalud by the of loop")
+		}
+	}
+
 	for _, ri := range rangeIters {
 		if err := ri.Close(); err != nil {
 			t.Fatalf("Close RangeIterator: %v", err)
