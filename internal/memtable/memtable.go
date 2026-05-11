@@ -12,9 +12,10 @@ import (
 type MemTable struct {
 	sync.RWMutex
 	base.RefCount
-	list *skiplist.SkipList[string, []byte]
-	wal  *wal.WAL
-	size int64
+	list   *skiplist.SkipList[string, []byte]
+	wal    *wal.WAL
+	size   int64
+	maxSeq uint64
 }
 
 func New(file *os.File, maxLevel int) *MemTable {
@@ -77,7 +78,13 @@ func (m *MemTable) Size() int64 {
 	return m.size
 }
 
-func (m *MemTable) Put(key string, data []byte) error {
+func (m *MemTable) MaxSeq() uint64 {
+	m.RLock()
+	defer m.RUnlock()
+	return m.maxSeq
+}
+
+func (m *MemTable) Put(seq uint64, key string, data []byte) error {
 	m.Lock()
 	defer m.Unlock()
 
@@ -85,25 +92,27 @@ func (m *MemTable) Put(key string, data []byte) error {
 
 	copy(copyVal, data)
 
-	err := m.wal.Write(wal.EntryTypeAdd, key, copyVal)
+	err := m.wal.Write(wal.EntryTypeAdd, seq, key, copyVal)
 	if err != nil {
 		return err
 	}
 
+	m.maxSeq = seq
 	m.apply(wal.EntryTypeAdd, key, copyVal)
 
 	return nil
 }
 
-func (m *MemTable) Delete(key string) error {
+func (m *MemTable) Delete(seq uint64, key string) error {
 	m.Lock()
 	defer m.Unlock()
 
-	err := m.wal.Write(wal.EntryTypeDel, key, []byte{})
+	err := m.wal.Write(wal.EntryTypeDel, seq, key, []byte{})
 	if err != nil {
 		return err
 	}
 
+	m.maxSeq = seq
 	m.apply(wal.EntryTypeDel, key, nil)
 
 	return nil
@@ -124,6 +133,7 @@ func (m *MemTable) Recover() error {
 		case wal.EntryTypeDel:
 			m.apply(entry.Op, entry.Key, nil)
 		}
+		m.maxSeq = entry.Seq
 		return nil
 	})
 

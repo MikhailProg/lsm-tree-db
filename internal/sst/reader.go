@@ -14,9 +14,10 @@ import (
 
 type Reader struct {
 	base.RefCount
-	file  *os.File
-	index []IndexRecord
-	bloom *bloom.CRC64
+	file   *os.File
+	index  []IndexRecord
+	bloom  *bloom.CRC64
+	maxSeq uint64
 }
 
 func NewReader(file *os.File) *Reader {
@@ -36,6 +37,10 @@ func (r *Reader) Close() error {
 	return r.file.Close()
 }
 
+func (r *Reader) MaxSeq() uint64 {
+	return r.maxSeq
+}
+
 func (r *Reader) LoadMetadata() error {
 	info, err := r.file.Stat()
 	if err != nil {
@@ -50,7 +55,7 @@ func (r *Reader) LoadMetadata() error {
 		return fmt.Errorf("read footer: %w", err)
 	}
 
-	if string(footer[18:]) != SSTMagic {
+	if string(footer[26:]) != SSTMagic {
 		return fmt.Errorf("invalid SST magic")
 	}
 
@@ -60,8 +65,9 @@ func (r *Reader) LoadMetadata() error {
 	}
 
 	bloomOffset := int64(binary.LittleEndian.Uint64(footer[8:16]))
-	hashNum := int(footer[16])
-	bitsPerKey := int(footer[17])
+	maxSeq := binary.LittleEndian.Uint64(footer[16:24])
+	hashNum := int(footer[24])
+	bitsPerKey := int(footer[25])
 
 	// Use buf reader to speedup reading index entries
 	br := bufio.NewReader(r.file)
@@ -120,7 +126,7 @@ func (r *Reader) LoadMetadata() error {
 		return fmt.Errorf("seek to start: %w", err)
 	}
 
-	r.bloom, r.index = bloom, index
+	r.bloom, r.index, r.maxSeq = bloom, index, maxSeq
 
 	return nil
 }

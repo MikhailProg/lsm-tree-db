@@ -81,8 +81,6 @@ func (l *LSM) loadSSTs() error {
 		return err
 	}
 
-	slices.Sort(sstPaths)
-
 	for _, sstPath := range sstPaths {
 		sstFile, err := os.Open(sstPath)
 		if err != nil {
@@ -114,8 +112,6 @@ func (l *LSM) loadWALs() error {
 	if err != nil {
 		return err
 	}
-
-	slices.Sort(walPaths)
 
 	walPaths = slices.DeleteFunc(walPaths, func(walPath string) bool {
 		sstPath := wal2sst(walPath)
@@ -173,12 +169,24 @@ func (l *LSM) Load() error {
 		return cmp.Compare(a.Name(), b.Name())
 	})
 
+	// Find max SST number to continue numbering files on FS
 	maxSSTNum := -1
 	if len(l.readers) > 0 {
 		maxSSTNum = numberFromName(l.readers[len(l.readers)-1].Name())
 	}
 
 	l.fileIndex.Store(int32(maxSSTNum + 1))
+
+	// Order SSTs by global write sequence number. The newest sst has
+	// the largest seq number and lives at the end.
+	slices.SortFunc(l.readers, func(a, b *sst.Reader) int {
+		return cmp.Compare(a.MaxSeq(), b.MaxSeq())
+	})
+
+	if len(l.readers) > 0 {
+		maxSeq := l.readers[len(l.readers)-1].MaxSeq()
+		l.writeSeq.Store(int64(maxSeq))
+	}
 
 	walFile, err := l.openWAL(int(l.fileIndex.Load()))
 	if err != nil {

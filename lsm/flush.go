@@ -94,7 +94,8 @@ func (l *LSM) doFlushToSST(table *memtable.MemTable) (string, error) {
 		return "", fmt.Errorf("create %s: %w", sstPathNew, err)
 	}
 
-	sstWriter := sst.NewWriter(sstFile, l.config.HashNumber, l.config.BitsPerKey)
+	sstWriter := sst.NewWriter(sstFile, table.MaxSeq(),
+		l.config.HashNumber, l.config.BitsPerKey)
 
 	sstWriterClean := func() {
 		_ = sstWriter.Close()

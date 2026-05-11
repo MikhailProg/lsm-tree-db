@@ -18,6 +18,7 @@ const (
 
 type WALEntry struct {
 	Op  EntryType
+	Seq uint64
 	Key string
 	Val []byte
 }
@@ -55,10 +56,10 @@ func (w *WAL) Reset() error {
 	return w.file.Truncate(0)
 }
 
-func (w *WAL) Write(op EntryType, key string, val []byte) error {
-	// [CRC 4b][op 1b][keyLen 2b][valLen 4b][key][val]
+func (w *WAL) Write(op EntryType, seq uint64, key string, val []byte) error {
+	// [CRC 4b][op 1b][seq 8b][keyLen 2b][valLen 4b][key][val]
 	// calc crc over op, keyLen, valLen, key and val
-	totalSize := 4 + 1 + 2 + 4 + len(key) + len(val)
+	totalSize := 4 + 1 + 8 + 2 + 4 + len(key) + len(val)
 
 	if totalSize > len(w.wbuf) {
 		w.wbuf = make([]byte, totalSize)
@@ -67,10 +68,11 @@ func (w *WAL) Write(op EntryType, key string, val []byte) error {
 	buf := w.wbuf[:totalSize]
 
 	buf[4] = byte(op)
-	binary.LittleEndian.PutUint16(buf[5:7], uint16(len(key)))
-	binary.LittleEndian.PutUint32(buf[7:11], uint32(len(val)))
-	copy(buf[11:], key)
-	copy(buf[11+len(key):], val)
+	binary.LittleEndian.PutUint64(buf[5:13], seq)
+	binary.LittleEndian.PutUint16(buf[13:15], uint16(len(key)))
+	binary.LittleEndian.PutUint32(buf[15:19], uint32(len(val)))
+	copy(buf[19:], key)
+	copy(buf[19+len(key):], val)
 
 	crc := crc32.ChecksumIEEE(buf[4:])
 	binary.LittleEndian.PutUint32(buf[0:4], crc)
@@ -83,8 +85,8 @@ func (w *WAL) Write(op EntryType, key string, val []byte) error {
 }
 
 func (w *WAL) Recover(fn func(WALEntry) error) error {
-	// [CRC 4b][op 1b][keyLen 2b][valLen 4b][key][val]
-	header := [11]byte{}
+	// [CRC 4b][op 1b][seq 8b][keyLen 2b][valLen 4b][key][val]
+	header := [19]byte{}
 	r := bufio.NewReader(w.file)
 
 	for {
@@ -97,8 +99,9 @@ func (w *WAL) Recover(fn func(WALEntry) error) error {
 
 		storedCrc := binary.LittleEndian.Uint32(header[:4])
 		op := EntryType(header[4])
-		keyLen := int(binary.LittleEndian.Uint16(header[5:7]))
-		valLen := int(binary.LittleEndian.Uint32(header[7:11]))
+		seq := binary.LittleEndian.Uint64(header[5:13])
+		keyLen := int(binary.LittleEndian.Uint16(header[13:15]))
+		valLen := int(binary.LittleEndian.Uint32(header[15:19]))
 
 		keyBuf := make([]byte, keyLen)
 		if _, err := io.ReadFull(r, keyBuf); err != nil {
@@ -122,6 +125,7 @@ func (w *WAL) Recover(fn func(WALEntry) error) error {
 
 		entry := WALEntry{
 			Op:  op,
+			Seq: seq,
 			Key: key,
 			Val: valBuf,
 		}

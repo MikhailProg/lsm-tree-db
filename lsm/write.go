@@ -42,12 +42,13 @@ func (l *LSM) writeLoop() {
 
 			var err error
 			if req.op != typeRotate {
+				seq := uint64(l.writeSeq.Add(1))
 				l.Lock()
 				switch req.op {
 				case typeAdd:
-					err = l.current.Put(req.key, req.val)
+					err = l.current.Put(seq, req.key, req.val)
 				case typeDel:
-					err = l.current.Delete(req.key)
+					err = l.current.Delete(seq, req.key)
 				}
 				l.Unlock()
 			}

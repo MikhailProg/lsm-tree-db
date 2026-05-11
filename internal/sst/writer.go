@@ -14,14 +14,16 @@ type Writer struct {
 	file       *os.File
 	offset     int64
 	index      []IndexRecord
+	maxSeq     uint64
 	hashNumber int
 	bitsPerKey int
 }
 
-func NewWriter(file *os.File, hashNumber int, bitsPerKey int) *Writer {
+func NewWriter(file *os.File, maxSeq uint64, hashNumber int, bitsPerKey int) *Writer {
 	return &Writer{
 		Writer:     bufio.NewWriter(file),
 		file:       file,
+		maxSeq:     maxSeq,
 		hashNumber: hashNumber,
 		bitsPerKey: bitsPerKey,
 	}
@@ -115,9 +117,10 @@ func (w *Writer) Flush() error {
 	var footer [FooterSize]byte
 	binary.LittleEndian.PutUint64(footer[:8], uint64(indexOffset))
 	binary.LittleEndian.PutUint64(footer[8:16], uint64(bloomOffset))
-	footer[16] = byte(w.hashNumber)
-	footer[17] = byte(w.bitsPerKey)
-	copy(footer[18:], []byte(SSTMagic))
+	binary.LittleEndian.PutUint64(footer[16:24], w.maxSeq)
+	footer[24] = byte(w.hashNumber)
+	footer[25] = byte(w.bitsPerKey)
+	copy(footer[26:], []byte(SSTMagic))
 	if _, err := w.Write(footer[:]); err != nil {
 		return fmt.Errorf("write footer: %w", err)
 	}

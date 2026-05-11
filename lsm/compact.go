@@ -108,7 +108,12 @@ func (l *LSM) doCompact(sstReaders []*sst.Reader, fileIndex int) (*sst.Reader, e
 		return nil, fmt.Errorf("create %s: %w", sstPathNew, err)
 	}
 
-	w := sst.NewWriter(sstFile, l.config.HashNumber, l.config.BitsPerKey)
+	var maxSeq uint64
+	for _, sstReader := range sstReaders {
+		maxSeq = max(maxSeq, sstReader.MaxSeq())
+	}
+
+	w := sst.NewWriter(sstFile, maxSeq, l.config.HashNumber, l.config.BitsPerKey)
 
 	if err := mergeData(w, sstReaders); err != nil {
 		_ = w.Close()

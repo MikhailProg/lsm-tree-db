@@ -50,6 +50,7 @@ type LSM struct {
 	frozen         []*memtable.MemTable
 	readers        []*sst.Reader
 	fileIndex      atomic.Int32
+	writeSeq       atomic.Int64
 	writeQueue     chan *putReq
 	flushSemFrozen chan struct{}
 	flushDone      chan struct{}

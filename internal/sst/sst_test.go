@@ -35,7 +35,8 @@ func TestSST_EndToEnd(t *testing.T) {
 		t.Fatalf("failed to create sst file: %v", err)
 	}
 
-	writer := NewWriter(fWrite, testHashNum, testBitsPerKey)
+	seq := uint64(len(testData))
+	writer := NewWriter(fWrite, seq, testHashNum, testBitsPerKey)
 	for _, d := range testData {
 		if d.del {
 			err = writer.Add(d.key, nil)
@@ -61,6 +62,10 @@ func TestSST_EndToEnd(t *testing.T) {
 	reader := NewReader(fRead)
 	if err := reader.LoadMetadata(); err != nil {
 		t.Fatalf("reader failed to parse sst: %v", err)
+	}
+
+	if reader.MaxSeq() != seq {
+		t.Fatalf("recovered seq mismatch: expected %d, got %d", seq, reader.MaxSeq())
 	}
 
 	for _, d := range testData {
@@ -117,8 +122,9 @@ func BenchmarkSST_Get(b *testing.B) {
 	path := filepath.Join(tmpDir, "bench.sst")
 
 	f, _ := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0644)
-	writer := NewWriter(f, testHashNum, testBitsPerKey)
-	for i := 0; i < 1000; i++ {
+	seq := uint64(1000)
+	writer := NewWriter(f, seq, testHashNum, testBitsPerKey)
+	for i := 0; i < int(seq); i++ {
 		writer.Add(fmt.Sprintf("key%04d", i), []byte("value"))
 	}
 	writer.Flush()

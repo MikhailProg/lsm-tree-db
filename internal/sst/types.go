@@ -11,7 +11,7 @@ const SSTMagic = "SSTB"
 
 const (
 	RecordHeaderSize = 7  // [type 1b][klen 2b][vlen 4b]
-	FooterSize       = 22 // [indexOffset 8b][bloomOffset 8b][hashNum 1b][bitsPerKey 1b][magic 4b]
+	FooterSize       = 30 // [indexOffset 8b][bloomOffset 8b][maxSeq 8b][hashNum 1b][bitsPerKey 1b][magic 4b]
 )
 
 type IndexRecord struct {

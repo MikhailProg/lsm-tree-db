@@ -17,13 +17,13 @@ func TestWAL_WriteAndRecover(t *testing.T) {
 	w := New(f)
 
 	entries := []WALEntry{
-		{Op: EntryTypeAdd, Key: "user:1", Val: []byte("alice")},
-		{Op: EntryTypeAdd, Key: "user:2", Val: []byte("bob")},
-		{Op: EntryTypeDel, Key: "user:1", Val: []byte{}},
+		{Op: EntryTypeAdd, Seq: 0, Key: "user:1", Val: []byte("alice")},
+		{Op: EntryTypeAdd, Seq: 1, Key: "user:2", Val: []byte("bob")},
+		{Op: EntryTypeDel, Seq: 2, Key: "user:1", Val: []byte{}},
 	}
 
 	for _, e := range entries {
-		if err := w.Write(e.Op, e.Key, e.Val); err != nil {
+		if err := w.Write(e.Op, e.Seq, e.Key, e.Val); err != nil {
 			t.Fatalf("failed to write entry: %v", err)
 		}
 	}
@@ -52,7 +52,9 @@ func TestWAL_WriteAndRecover(t *testing.T) {
 	}
 
 	for i := range entries {
-		if recovered[i].Key != entries[i].Key || recovered[i].Op != entries[i].Op {
+		if recovered[i].Op != entries[i].Op ||
+			recovered[i].Seq != entries[i].Seq ||
+			recovered[i].Key != entries[i].Key {
 			t.Errorf("entry %d mismatch", i)
 		}
 	}
