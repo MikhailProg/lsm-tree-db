@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.io/MikhailProg/lsm-tree-db/internal/base"
-	"github.io/MikhailProg/lsm-tree-db/internal/sst"
+	"github.com/MikhailProg/lsm-tree-db/internal/base"
+	"github.com/MikhailProg/lsm-tree-db/internal/sst"
 )
 
 func (l *LSM) compactLoop() {

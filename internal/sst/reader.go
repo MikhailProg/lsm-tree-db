@@ -8,8 +8,8 @@ import (
 	"os"
 	"sort"
 
-	"github.io/MikhailProg/lsm-tree-db/internal/base"
-	"github.io/MikhailProg/lsm-tree-db/internal/bloom"
+	"github.com/MikhailProg/lsm-tree-db/internal/base"
+	"github.com/MikhailProg/lsm-tree-db/internal/bloom"
 )
 
 type Reader struct {

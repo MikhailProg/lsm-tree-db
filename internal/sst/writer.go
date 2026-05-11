@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.io/MikhailProg/lsm-tree-db/internal/bloom"
+	"github.com/MikhailProg/lsm-tree-db/internal/bloom"
 )
 
 type Writer struct {

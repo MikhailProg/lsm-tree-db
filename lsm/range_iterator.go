@@ -1,7 +1,7 @@
 package lsm
 
 import (
-	"github.io/MikhailProg/lsm-tree-db/internal/base"
+	"github.com/MikhailProg/lsm-tree-db/internal/base"
 )
 
 type RangeIterator struct {

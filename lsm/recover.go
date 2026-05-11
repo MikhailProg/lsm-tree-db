@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.io/MikhailProg/lsm-tree-db/internal/memtable"
-	"github.io/MikhailProg/lsm-tree-db/internal/sst"
-	"github.io/MikhailProg/lsm-tree-db/internal/wal"
+	"github.com/MikhailProg/lsm-tree-db/internal/memtable"
+	"github.com/MikhailProg/lsm-tree-db/internal/sst"
+	"github.com/MikhailProg/lsm-tree-db/internal/wal"
 )
 
 func listFiles(dir, ext string) ([]string, error) {

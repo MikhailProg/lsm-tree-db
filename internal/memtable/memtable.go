@@ -4,9 +4,9 @@ import (
 	"os"
 	"sync"
 
-	"github.io/MikhailProg/lsm-tree-db/internal/base"
-	"github.io/MikhailProg/lsm-tree-db/internal/skiplist"
-	"github.io/MikhailProg/lsm-tree-db/internal/wal"
+	"github.com/MikhailProg/lsm-tree-db/internal/base"
+	"github.com/MikhailProg/lsm-tree-db/internal/skiplist"
+	"github.com/MikhailProg/lsm-tree-db/internal/wal"
 )
 
 type MemTable struct {

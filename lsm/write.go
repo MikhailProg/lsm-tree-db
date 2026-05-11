@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.io/MikhailProg/lsm-tree-db/internal/memtable"
-	"github.io/MikhailProg/lsm-tree-db/internal/wal"
+	"github.com/MikhailProg/lsm-tree-db/internal/memtable"
+	"github.com/MikhailProg/lsm-tree-db/internal/wal"
 )
 
 // seq := l.nextSeq.Add(1)

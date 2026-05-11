@@ -1,6 +1,6 @@
 package memtable
 
-import "github.io/MikhailProg/lsm-tree-db/internal/skiplist"
+import "github.com/MikhailProg/lsm-tree-db/internal/skiplist"
 
 type Iterator struct {
 	*skiplist.Iterator[string, []byte]

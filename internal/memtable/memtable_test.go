@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.io/MikhailProg/lsm-tree-db/internal/wal"
+	"github.com/MikhailProg/lsm-tree-db/internal/wal"
 )
 
 const (
