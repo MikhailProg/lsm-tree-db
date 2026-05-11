@@ -6,7 +6,7 @@ import (
 )
 
 type RefCount struct {
-	mu      sync.Mutex // lock for destroy
+	mu      sync.Mutex // lock for release
 	count   atomic.Int32
 	release func() error
 }

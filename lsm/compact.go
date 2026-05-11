@@ -89,6 +89,7 @@ func (l *LSM) prepareCompact() ([]*sst.Reader, int) {
 
 		sstReaders = make([]*sst.Reader, 0, len(l.readers))
 		for i := len(l.readers) - 1; i >= 0; i-- {
+			l.readers[i].Ref()
 			sstReaders = append(sstReaders, l.readers[i])
 		}
 
@@ -154,6 +155,7 @@ func (l *LSM) updateSSTReaders(r *sst.Reader, sstReaders []*sst.Reader) {
 			if sstReaders[len(sstReaders)-i-1] != l.readers[i] {
 				panic("SST readers must be equal")
 			}
+			l.readers[i].UnRef()
 			l.readers[i] = nil
 		}
 		l.readers = append([]*sst.Reader{r}, l.readers[len(sstReaders):]...)
@@ -166,6 +168,12 @@ func (l *LSM) compactOnce() error {
 	if sstReaders == nil {
 		return nil
 	}
+
+	defer func() {
+		for _, sstReader := range sstReaders {
+			_, _ = sstReader.UnRef()
+		}
+	}()
 
 	sstReader, err := l.doCompact(sstReaders, fileIndex)
 	if err != nil {
@@ -181,7 +189,6 @@ func (l *LSM) compactOnce() error {
 			}
 			return os.Remove(sstReader.Name())
 		})
-		_, _ = sstReader.UnRef()
 	}
 
 	return nil
