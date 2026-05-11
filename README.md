@@ -17,11 +17,10 @@ It is a pet project. A lightweight (under 2.5k LOC) key-value storage engine imp
 *   **Write Pipeline**: Optimized using a `Write Queue` and `sync.Pool` to achieve high throughput, linearize operations, and reduce GC pressure.
 *   **Snapshot Isolation**: Supports consistent range scans. When a `Scan` is initiated, the engine captures a consistent "view" of the data without blocking incoming `Put` requests.
 *   **Thread-Safe Resource Management**: Implements a custom **Reference Counting (RC)** system to manage the lifecycle of SSTables and MemTables. Files are deleted only when they are no longer held by any active iterators.
-*   **Deterministic Crash Recovery**: Uses a **Write-Ahead Log (WAL)** and **Sequence Numbers** to guarantee data durability and restore the correct chronological order of files after a crash.
+*   **Deterministic Crash Recovery**: Uses a **Write-Ahead Log (WAL)** and **Sequence Numbers** to guarantee data durability and restore the correct chronological order of files after a crash. Scans the data directory on startup, reconstructs the file index, loads metadata for existing SSTables, and replays unfinished WAL logs.
 *   **Backpressure & Resource Control**: Managed via semaphores (`flushSemFrozen`) to prevent Out-Of-Memory (OOM) during high-load.
 *   **Auto-Flush & Rotation**: Background goroutines automatically transition filled MemTables to Frozen state and flush them to disk as SSTables.
 *   **Auto-Compaction**: Periodically merges multiple SSTables into a single file to reclaim space, handle duplicates, and maintain read performance.
-*   **Smart Recovery**: Scans the data directory on startup, reconstructs the file index, loads metadata for existing SSTables, and replays unfinished WAL logs.
 
 ### 4. Iteration
 *   **Iterators**: Implementation of `Seek/Valid/Next/Key/Value` interface for both memory and disk layers.
