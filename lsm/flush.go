@@ -117,6 +117,11 @@ func (l *LSM) doFlushToSST(table *memtable.MemTable) (string, error) {
 		return "", it.Err()
 	}
 
+	if err := it.Close(); err != nil {
+		sstWriterClean()
+		return "", err
+	}
+
 	if err := sstWriter.Flush(); err != nil {
 		sstWriterClean()
 		return "", fmt.Errorf("flush sst %s: %w", sstWriter.Name(), err)
