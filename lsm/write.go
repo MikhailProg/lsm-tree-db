@@ -9,9 +9,6 @@ import (
 	"github.com/MikhailProg/lsm-tree-db/internal/wal"
 )
 
-// seq := l.nextSeq.Add(1)
-// err = l.current.Put(seq, req.key, req.val)
-
 func (l *LSM) writeLoop() {
 	for {
 		select {
@@ -52,6 +49,7 @@ func (l *LSM) writeLoop() {
 				}
 				l.Unlock()
 			}
+
 			req.errCh <- err
 		}
 	}

@@ -232,10 +232,9 @@ func (l *LSM) sendReq(op reqType, key string, val []byte) error {
 	case <-l.ctx.Done():
 		err = l.ctx.Err()
 	case err = <-req.errCh:
+		req.op, req.key, req.val = typeUnknown, "", nil
+		l.reqPool.Put(req)
 	}
-
-	req.op, req.key, req.val = typeUnknown, "", nil
-	l.reqPool.Put(req)
 
 	return err
 }
