@@ -15,29 +15,30 @@ func (l *LSM) flushLoop() {
 		case <-l.ctx.Done():
 			return
 		case <-l.flushWake:
-		}
-
-		if l.flushDisabled.Load() {
-			continue
-		}
-
-		for l.flushFrozen() {
-			select {
-			case <-l.ctx.Done():
-				return
-				// Return token to queue
-			case l.flushSemFrozen <- struct{}{}:
-				// notify if someone is waiting for flushDone event
-				// create new event for a new flush
-				l.Lock()
-				{
-					close(l.flushDone)
-					l.flushDone = make(chan struct{})
-				}
-				l.Unlock()
+			if !l.flushDisabled.Load() {
+				l.handleFrozen()
 			}
-			l.wakeCompaction()
 		}
+	}
+}
+
+func (l *LSM) handleFrozen() {
+	for l.flushFrozen() {
+		select {
+		case <-l.ctx.Done():
+			return
+			// Return token to queue
+		case l.flushSemFrozen <- struct{}{}:
+			// notify if someone is waiting for flushDone event
+			// create new event for a new flush
+			l.Lock()
+			{
+				close(l.flushDone)
+				l.flushDone = make(chan struct{})
+			}
+			l.Unlock()
+		}
+		l.wakeCompaction()
 	}
 }
 
