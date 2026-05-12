@@ -41,6 +41,56 @@ func (r *Reader) MaxSeq() uint64 {
 	return r.maxSeq
 }
 
+func (r *Reader) loadIndex(indexOffset, endOffset int64) ([]IndexRecord, error) {
+	// Use buf reader to speedup reading index entries
+	br := bufio.NewReader(r.file)
+
+	index := []IndexRecord{}
+	keyBuf := make([]byte, 4096)
+	currOffset := indexOffset
+
+	// Index info
+	// [keyLen 2b][key][offset 8b][recordSize 4b]
+	for currOffset < endOffset {
+		var keyLenBuf [2]byte
+		if _, err := io.ReadFull(br, keyLenBuf[:2]); err != nil {
+			return nil, err
+		}
+
+		keyLen := int(binary.LittleEndian.Uint16(keyLenBuf[:]))
+		if keyLen > len(keyBuf) {
+			keyBuf = make([]byte, keyLen)
+		}
+		if _, err := io.ReadFull(br, keyBuf[:keyLen]); err != nil {
+			return nil, err
+		}
+
+		key := string(keyBuf[:keyLen])
+
+		var offsetBuf [8]byte
+		if _, err := io.ReadFull(br, offsetBuf[:]); err != nil {
+			return nil, fmt.Errorf("read offset: %w", err)
+		}
+		offset := int64(binary.LittleEndian.Uint64(offsetBuf[:]))
+
+		var sizeBuf [4]byte
+		if _, err := io.ReadFull(br, sizeBuf[:]); err != nil {
+			return nil, fmt.Errorf("read record size: %w", err)
+		}
+		recordSize := int32(binary.LittleEndian.Uint32(sizeBuf[:]))
+
+		index = append(index, IndexRecord{
+			key:    key,
+			offset: offset,
+			size:   recordSize,
+		})
+
+		currOffset += int64(len(keyLenBuf) + keyLen + len(offsetBuf) + len(sizeBuf))
+	}
+
+	return index, nil
+}
+
 func (r *Reader) LoadMetadata() error {
 	info, err := r.file.Stat()
 	if err != nil {
@@ -60,60 +110,22 @@ func (r *Reader) LoadMetadata() error {
 	}
 
 	indexOffset := int64(binary.LittleEndian.Uint64(footer[:8]))
-	if _, err := r.file.Seek(indexOffset, io.SeekStart); err != nil {
-		return fmt.Errorf("seek to index: %w", err)
-	}
-
 	bloomOffset := int64(binary.LittleEndian.Uint64(footer[8:16]))
 	maxSeq := binary.LittleEndian.Uint64(footer[16:24])
 	hashNum := int(footer[24])
 	bitsPerKey := int(footer[25])
 
-	// Use buf reader to speedup reading index entries
-	br := bufio.NewReader(r.file)
-
-	index := []IndexRecord{}
-	keyBuf := make([]byte, 4096)
-	currOffset := indexOffset
-	// Index info
-	// [keyLen 2b][key][offset 8b][recordSize 4b]
-	for currOffset < bloomOffset {
-		var keyLenBuf [2]byte
-		if _, err := io.ReadFull(br, keyLenBuf[:2]); err != nil {
-			return err
-		}
-
-		keyLen := int(binary.LittleEndian.Uint16(keyLenBuf[:]))
-		if keyLen > len(keyBuf) {
-			keyBuf = make([]byte, keyLen)
-		}
-		if _, err := io.ReadFull(br, keyBuf[:keyLen]); err != nil {
-			return err
-		}
-
-		key := string(keyBuf[:keyLen])
-
-		var offsetBuf [8]byte
-		if _, err := io.ReadFull(br, offsetBuf[:]); err != nil {
-			return fmt.Errorf("read offset: %w", err)
-		}
-		offset := int64(binary.LittleEndian.Uint64(offsetBuf[:]))
-
-		var sizeBuf [4]byte
-		if _, err := io.ReadFull(br, sizeBuf[:]); err != nil {
-			return fmt.Errorf("read record size: %w", err)
-		}
-		recordSize := int32(binary.LittleEndian.Uint32(sizeBuf[:]))
-
-		index = append(index, IndexRecord{
-			key:    key,
-			offset: offset,
-			size:   recordSize,
-		})
-
-		currOffset += int64(len(keyLenBuf) + keyLen + len(offsetBuf) + len(sizeBuf))
+	if _, err := r.file.Seek(indexOffset, io.SeekStart); err != nil {
+		return fmt.Errorf("seek to index: %w", err)
 	}
 
+	// Load index
+	index, err := r.loadIndex(indexOffset, bloomOffset)
+	if err != nil {
+		return err
+	}
+
+	// Load Bloom filter
 	filterSize := footerOffset - bloomOffset
 	filterBuf := make([]byte, filterSize)
 	if _, err := r.file.ReadAt(filterBuf, bloomOffset); err != nil {
