@@ -55,6 +55,7 @@ type LSM struct {
 	flushSemFrozen chan struct{}
 	flushDone      chan struct{}
 	flushWake      chan struct{}
+	flushDisabled  atomic.Bool
 	compactDone    chan struct{}
 	compactWake    chan struct{}
 	startOnce      sync.Once
@@ -149,6 +150,7 @@ func (l *LSM) Start() {
 			l.compactLoop()
 		}()
 	})
+	l.wakeCompaction()
 }
 
 func (l *LSM) Get(key string) ([]byte, bool, error) {
@@ -249,6 +251,6 @@ func (l *LSM) Delete(key string) error {
 	return l.sendReq(typeDel, key, nil)
 }
 
-func (l *LSM) Rotate() error {
+func (l *LSM) rotate() error {
 	return l.sendReq(typeRotate, "", nil)
 }

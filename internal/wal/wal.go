@@ -29,7 +29,7 @@ type WAL struct {
 }
 
 func WALOpenFile(filename string) (*os.File, error) {
-	file, err := os.OpenFile(filename, os.O_CREATE|os.O_RDWR, 0644)
+	file, err := os.OpenFile(filename, os.O_CREATE|os.O_RDWR, 0664)
 	if err != nil {
 		return nil, fmt.Errorf("wal open file %s: %w", filename, err)
 	}

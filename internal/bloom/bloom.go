@@ -69,6 +69,10 @@ func (f *CRC64) Data() []byte {
 }
 
 func (f *CRC64) Contains(key string) bool {
+	if len(f.data) == 0 {
+		return false
+	}
+
 	sum := crc64.Checksum(
 		unsafe.Slice(unsafe.StringData(key), len(key)),
 		crcTable)

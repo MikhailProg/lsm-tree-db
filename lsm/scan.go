@@ -8,7 +8,7 @@ import (
 
 func (l *LSM) Scan(startKey, endKey string) (*RangeIterator, error) {
 	// Wait till the current table becomes frozen
-	if err := l.Rotate(); err != nil {
+	if err := l.rotate(); err != nil {
 		return nil, err
 	}
 

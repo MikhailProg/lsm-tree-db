@@ -272,6 +272,46 @@ func TestLSM_Compact(t *testing.T) {
 	}
 }
 
+func TestLSM_Backpressure(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	lsm, err := Open(DefaultConfig(tmpDir), context.Background())
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	defer lsm.Close()
+
+	lsm.disableFlusher()
+
+	// flush is disabled, consume all semaphors
+	for range lsm.config.SemFrozenMaxLen {
+		lsm.Put("key", []byte("val"))
+		lsm.rotate()
+	}
+
+	ch := make(chan struct{})
+
+	go func() {
+		defer close(ch)
+		lsm.Put("key", []byte("val"))
+		// rotate must be blocked
+		lsm.rotate()
+	}()
+
+	timeout := false
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		timeout = true
+		lsm.enableFlusher()
+	}
+
+	if !timeout {
+		t.Error("Timeout is expected, rotate() should be blocked")
+	}
+}
+
 func TestLSM_ScanRefUnref(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -298,7 +338,14 @@ func TestLSM_ScanRefUnref(t *testing.T) {
 
 		// take flush channel before Scan() rotate and flush table
 		flushDone := lsm.FlushDone()
+
+		// Disable flusher before take RangeIterator, garantie that
+		// the current table stucks in frozen (not become SST)
+		// RangeIterator takes a snapshot from frozen
+		lsm.disableFlusher()
 		ri, _ := lsm.Scan("a", "b")
+		lsm.enableFlusher()
+
 		rangeIters = append(rangeIters, ri)
 
 		select {

@@ -17,6 +17,10 @@ func (l *LSM) flushLoop() {
 		case <-l.flushWake:
 		}
 
+		if l.flushDisabled.Load() {
+			continue
+		}
+
 		for l.flushFrozen() {
 			select {
 			case <-l.ctx.Done():
@@ -167,4 +171,15 @@ func (l *LSM) wakeFlusher() {
 	case l.flushWake <- struct{}{}:
 	default:
 	}
+}
+
+// For tests only
+func (l *LSM) disableFlusher() {
+	l.flushDisabled.Store(true)
+}
+
+// For tests only
+func (l *LSM) enableFlusher() {
+	l.flushDisabled.Store(false)
+	l.wakeFlusher()
 }
