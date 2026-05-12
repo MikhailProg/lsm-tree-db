@@ -23,10 +23,11 @@ func (l *LSM) writeLoop() {
 func (l *LSM) handleReq(req *writeReq) {
 	l.RLock()
 	tableSize := l.current.Size()
+	l.RUnlock()
+
 	needRotate :=
 		req.op == typeRotate && tableSize > 0 ||
 			tableSize >= l.config.MaxMemTableSize
-	l.RUnlock()
 
 	if needRotate {
 		// request a token from the semaphore

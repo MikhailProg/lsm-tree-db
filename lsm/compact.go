@@ -55,6 +55,11 @@ func mergeData(sstWriter *sst.Writer, sstReaders []*sst.Reader) error {
 	for ; mi.Valid(); mi.Next() {
 		key, val := mi.Key(), mi.Value()
 
+		// remove tobmstones (deleted keys)
+		if val == nil {
+			continue
+		}
+
 		if err := sstWriter.Add(key, val); err != nil {
 			return fmt.Errorf(
 				"sst writer add key %s to %s: %w", key, sstWriter.Name(), err)

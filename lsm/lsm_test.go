@@ -22,7 +22,7 @@ func eventDone(ch <-chan struct{}) bool {
 
 func fillTillEvent(lsm *LSM, event <-chan struct{}) {
 	for i := 0; !eventDone(event); i++ {
-		key := fmt.Sprintf("burst_%02d", i)
+		key := fmt.Sprintf("burst_%d", i)
 		lsm.Put(key, []byte("large_value_to_trigger_flush_logic_1234567890"))
 	}
 }
