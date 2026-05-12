@@ -26,7 +26,7 @@ const (
 	typeRotate
 )
 
-type putReq struct {
+type writeReq struct {
 	op    reqType
 	key   string
 	val   []byte
@@ -51,7 +51,7 @@ type LSM struct {
 	readers        []*sst.Reader
 	fileIndex      atomic.Int32
 	writeSeq       atomic.Int64
-	writeQueue     chan *putReq
+	writeQueue     chan *writeReq
 	flushSemFrozen chan struct{}
 	flushDone      chan struct{}
 	flushWake      chan struct{}
@@ -87,13 +87,13 @@ func New(config Config, ctx context.Context) *LSM {
 		flushDone:      make(chan struct{}),
 		compactWake:    make(chan struct{}, 1),
 		compactDone:    make(chan struct{}),
-		writeQueue:     make(chan *putReq),
+		writeQueue:     make(chan *writeReq),
 		ctx:            ctx,
 		cancel:         cancel,
 		wg:             sync.WaitGroup{},
 		reqPool: &sync.Pool{
 			New: func() any {
-				return &putReq{errCh: make(chan error, 1)}
+				return &writeReq{errCh: make(chan error, 1)}
 			},
 		},
 	}
@@ -218,7 +218,7 @@ func (l *LSM) Get(key string) ([]byte, bool, error) {
 }
 
 func (l *LSM) sendReq(op reqType, key string, val []byte) error {
-	req := l.reqPool.Get().(*putReq)
+	req := l.reqPool.Get().(*writeReq)
 	req.op, req.key, req.val = op, key, val
 
 	select {

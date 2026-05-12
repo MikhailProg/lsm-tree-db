@@ -310,6 +310,12 @@ func TestLSM_Backpressure(t *testing.T) {
 	if !timeout {
 		t.Error("Timeout is expected, rotate() should be blocked")
 	}
+
+	select {
+	case <-ch:
+	case <-time.After(time.Second * 2):
+		t.Error("rotate() remained blocked even after enabling the flusher")
+	}
 }
 
 func TestLSM_ScanRefUnref(t *testing.T) {
