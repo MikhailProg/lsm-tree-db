@@ -27,15 +27,22 @@ func TestWAL_WriteAndRecover(t *testing.T) {
 			t.Fatalf("failed to write entry: %v", err)
 		}
 	}
-	f.Close()
+
+	if err := w.Sync(); err != nil {
+		t.Fatalf("failed to sync wal: %v", err)
+	}
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("failed to close wal: %v", err)
+	}
 
 	f2, err := WALOpenFile(walPath)
 	if err != nil {
 		t.Fatalf("failed to reopen wal: %v", err)
 	}
-	defer f2.Close()
 
 	w2 := New(f2)
+	defer w2.Close()
 	var recovered []WALEntry
 
 	err = w2.Recover(func(e WALEntry) error {

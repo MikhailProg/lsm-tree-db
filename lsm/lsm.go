@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -41,6 +44,7 @@ type Config struct {
 	BitsPerKey          int
 	SSTCompactThreshold int
 	SemFrozenMaxLen     int
+	UseWAL              bool
 }
 
 type LSM struct {
@@ -74,6 +78,7 @@ func DefaultConfig(dbDir string) Config {
 		BitsPerKey:          10, // bloom filter
 		SSTCompactThreshold: 4,
 		SemFrozenMaxLen:     8,
+		UseWAL:              true,
 	}
 }
 
@@ -252,4 +257,27 @@ func (l *LSM) Delete(key string) error {
 
 func (l *LSM) rotate() error {
 	return l.sendReq(typeRotate, "", nil)
+}
+
+func (l *LSM) genSSTFilename(index int) string {
+	return filepath.Join(l.config.DbDir, fmt.Sprintf(sstFilenameFormat, index))
+}
+
+func (l *LSM) genWALFilename(index int) string {
+	return filepath.Join(l.config.DbDir, fmt.Sprintf(walFilenameFormat, index))
+}
+
+func indexFromFilename(filename string) int {
+	ext := filepath.Ext(filename)
+	num, err := strconv.Atoi(
+		strings.TrimSuffix(filepath.Base(filename), ext))
+	if err != nil {
+		panic(fmt.Sprintf(
+			"Try to extract file index from filename: %s", filename))
+	}
+	return num
+}
+
+func wal2sst(wal string) string {
+	return strings.TrimSuffix(wal, ".wal") + ".sst"
 }

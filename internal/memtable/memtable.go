@@ -16,12 +16,13 @@ type MemTable struct {
 	wal    *wal.WAL
 	size   int64
 	maxSeq uint64
+	index  int
 }
 
-func New(file *os.File, maxLevel int) *MemTable {
+func New(index int, maxLevel int) *MemTable {
 	m := &MemTable{
-		wal:  wal.New(file),
-		list: skiplist.New[string, []byte](maxLevel),
+		index: index,
+		list:  skiplist.New[string, []byte](maxLevel),
 	}
 
 	m.Init()
@@ -32,20 +33,62 @@ func New(file *os.File, maxLevel int) *MemTable {
 	return m
 }
 
+func NewWithWAL(wal *wal.WAL, index int, maxLevel int) *MemTable {
+	m := New(index, maxLevel)
+	m.wal = wal
+	return m
+}
+
+func (m *MemTable) Index() int {
+	m.RLock()
+	defer m.RUnlock()
+	return m.index
+}
+
+func (m *MemTable) Sync() error {
+	m.Lock()
+	defer m.Unlock()
+	if m.wal == nil {
+		return nil
+	}
+	return m.wal.Sync()
+}
+
 func (m *MemTable) Name() string {
+	m.RLock()
+	defer m.RUnlock()
+	if m.wal == nil {
+		return ""
+	}
 	return m.wal.Name()
 }
 
 func (m *MemTable) Close() error {
+	m.Lock()
+	defer m.Unlock()
+	if m.wal == nil {
+		return nil
+	}
 	return m.wal.Close()
+}
+
+func (m *MemTable) Remove() error {
+	m.Lock()
+	defer m.Unlock()
+	if m.wal == nil {
+		return nil
+	}
+	return os.Remove(m.wal.Name())
 }
 
 func (m *MemTable) Reset() error {
 	m.Lock()
 	defer m.Unlock()
 
-	if err := m.wal.Reset(); err != nil {
-		return err
+	if m.wal != nil {
+		if err := m.wal.Reset(); err != nil {
+			return err
+		}
 	}
 
 	m.list = skiplist.New[string, []byte](m.list.MaxLevel())
@@ -92,9 +135,11 @@ func (m *MemTable) Put(seq uint64, key string, data []byte) error {
 
 	copy(copyVal, data)
 
-	err := m.wal.Write(wal.EntryTypeAdd, seq, key, copyVal)
-	if err != nil {
-		return err
+	if m.wal != nil {
+		err := m.wal.Write(wal.EntryTypeAdd, seq, key, copyVal)
+		if err != nil {
+			return err
+		}
 	}
 
 	m.maxSeq = seq
@@ -107,9 +152,11 @@ func (m *MemTable) Delete(seq uint64, key string) error {
 	m.Lock()
 	defer m.Unlock()
 
-	err := m.wal.Write(wal.EntryTypeDel, seq, key, []byte{})
-	if err != nil {
-		return err
+	if m.wal != nil {
+		err := m.wal.Write(wal.EntryTypeDel, seq, key, []byte{})
+		if err != nil {
+			return err
+		}
 	}
 
 	m.maxSeq = seq

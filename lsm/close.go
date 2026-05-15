@@ -11,6 +11,12 @@ func (l *LSM) Close() error {
 
 	var errs []error
 
+	if l.current.Size() > 0 {
+		if _, err := l.doFlushToSST(l.current); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
 	if _, err := l.current.UnRef(); err != nil {
 		errs = append(
 			errs, fmt.Errorf(
@@ -18,7 +24,12 @@ func (l *LSM) Close() error {
 	}
 	l.current = nil
 
-	for _, table := range l.frozen {
+	for i := len(l.frozen) - 1; i >= 0; i-- {
+		table := l.frozen[i]
+		if _, err := l.doFlushToSST(table); err != nil {
+			errs = append(errs, err)
+		}
+
 		if _, err := table.UnRef(); err != nil {
 			errs = append(
 				errs, fmt.Errorf(
@@ -27,7 +38,8 @@ func (l *LSM) Close() error {
 	}
 	l.frozen = nil
 
-	for _, sstReader := range l.readers {
+	for i := len(l.readers) - 1; i >= 0; i-- {
+		sstReader := l.readers[i]
 		if _, err := sstReader.UnRef(); err != nil {
 			errs = append(
 				errs, fmt.Errorf(

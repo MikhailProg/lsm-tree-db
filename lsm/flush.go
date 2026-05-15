@@ -3,7 +3,6 @@ package lsm
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/MikhailProg/lsm-tree-db/internal/memtable"
 	"github.com/MikhailProg/lsm-tree-db/internal/sst"
@@ -16,17 +15,19 @@ func (l *LSM) flushLoop() {
 			return
 		case <-l.flushWake:
 			if !l.flushDisabled.Load() {
-				l.handleFrozen()
+				if !l.handleFrozen() {
+					return
+				}
 			}
 		}
 	}
 }
 
-func (l *LSM) handleFrozen() {
+func (l *LSM) handleFrozen() bool {
 	for l.flushFrozen() {
 		select {
 		case <-l.ctx.Done():
-			return
+			return false
 			// Return token to queue
 		case l.flushSemFrozen <- struct{}{}:
 			// notify if someone is waiting for flushDone event
@@ -40,6 +41,7 @@ func (l *LSM) handleFrozen() {
 		}
 		l.wakeCompaction()
 	}
+	return true
 }
 
 func (l *LSM) flushFrozen() bool {
@@ -74,7 +76,8 @@ func (l *LSM) flushFrozen() bool {
 		if err := table.Close(); err != nil {
 			return err
 		}
-		return os.Remove(table.Name())
+		return table.Remove()
+
 	})
 	// Pretend it's not crucial
 	_, _ = table.UnRef()
@@ -82,16 +85,12 @@ func (l *LSM) flushFrozen() bool {
 	return true
 }
 
-func sst2wal(sst string) string {
-	return strings.TrimSuffix(sst, ".sst") + ".wal"
-}
-
-func wal2sst(wal string) string {
-	return strings.TrimSuffix(wal, ".wal") + ".sst"
-}
-
 func (l *LSM) doFlushToSST(table *memtable.MemTable) (string, error) {
-	sstPath := wal2sst(table.Name())
+	if err := table.Sync(); err != nil {
+		return "", err
+	}
+
+	sstPath := l.genSSTFilename(table.Index())
 	sstPathNew := sstPath + ".new"
 
 	sstFile, err := os.Create(sstPathNew)

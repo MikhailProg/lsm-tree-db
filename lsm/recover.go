@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
-	"strings"
 
 	"github.com/MikhailProg/lsm-tree-db/internal/memtable"
 	"github.com/MikhailProg/lsm-tree-db/internal/sst"
@@ -30,15 +28,10 @@ func listFiles(dir, ext string) ([]string, error) {
 	return files, nil
 }
 
-func numberFromName(filename string) int {
-	ext := filepath.Ext(filename)
-	num, _ := strconv.Atoi(
-		strings.TrimSuffix(filepath.Base(filename), ext))
-	return num
-}
-
 func (l *LSM) recoverSSTFromWAL(sstPath string) (*sst.Reader, error) {
-	walPath := sst2wal(sstPath)
+	index := indexFromFilename(sstPath)
+
+	walPath := l.genWALFilename(index)
 	walFile, err := os.Open(walPath)
 	if err != nil {
 		return nil, fmt.Errorf(
@@ -51,7 +44,7 @@ func (l *LSM) recoverSSTFromWAL(sstPath string) (*sst.Reader, error) {
 			"rename sst %s to %s: %w", sstPath, sstPathBad, err)
 	}
 
-	table := memtable.New(walFile, l.config.MaxMemTableLevel)
+	table := memtable.NewWithWAL(wal.New(walFile), index, l.config.MaxMemTableLevel)
 
 	if err := table.Recover(); err != nil {
 		_, _ = table.UnRef()
@@ -113,6 +106,7 @@ func (l *LSM) loadWALs() error {
 		return err
 	}
 
+	// exclude WALs with existing SSTs, we've already loaded them
 	walPaths = slices.DeleteFunc(walPaths, func(walPath string) bool {
 		sstPath := wal2sst(walPath)
 		_, err := os.Stat(sstPath)
@@ -125,7 +119,9 @@ func (l *LSM) loadWALs() error {
 			return fmt.Errorf("open wal %s: %w", walPath, err)
 		}
 
-		table := memtable.New(walFile, l.config.MaxMemTableLevel)
+		index := indexFromFilename(walPath)
+		table := memtable.NewWithWAL(
+			wal.New(walFile), index, l.config.MaxMemTableLevel)
 
 		walPathBad := ""
 		// WAL can be corrupted try to recover it as it is
@@ -172,10 +168,10 @@ func (l *LSM) Load() error {
 	// Find max SST number to continue numbering files on FS
 	maxSSTNum := -1
 	if len(l.readers) > 0 {
-		maxSSTNum = numberFromName(l.readers[len(l.readers)-1].Name())
+		maxSSTNum = indexFromFilename(l.readers[len(l.readers)-1].Name())
 	}
 
-	l.fileIndex.Store(int32(maxSSTNum + 1))
+	l.fileIndex.Store(int32(maxSSTNum))
 
 	// Order SSTs by global write sequence number. The newest sst has
 	// the largest seq number and lives at the end.
@@ -188,12 +184,12 @@ func (l *LSM) Load() error {
 		l.writeSeq.Store(int64(maxSeq))
 	}
 
-	walFile, err := l.openWAL(int(l.fileIndex.Load()))
+	current, err := l.createMemTable()
 	if err != nil {
 		return err
 	}
 
-	l.current = memtable.New(walFile, l.config.MaxMemTableLevel)
+	l.current = current
 
 	return nil
 }

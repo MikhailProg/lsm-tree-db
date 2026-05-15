@@ -3,7 +3,6 @@ package lsm
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/MikhailProg/lsm-tree-db/internal/base"
 	"github.com/MikhailProg/lsm-tree-db/internal/sst"
@@ -75,10 +74,6 @@ func mergeData(sstWriter *sst.Writer, sstReaders []*sst.Reader) error {
 	}
 
 	return sstWriter.Flush()
-}
-
-func (l *LSM) genSSTFilename(fileIndex int) string {
-	return filepath.Join(l.config.DbDir, fmt.Sprintf(sstFilenameFormat, fileIndex))
 }
 
 func (l *LSM) prepareCompact() ([]*sst.Reader, int) {

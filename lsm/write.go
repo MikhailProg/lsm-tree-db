@@ -3,7 +3,6 @@ package lsm
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/MikhailProg/lsm-tree-db/internal/memtable"
 	"github.com/MikhailProg/lsm-tree-db/internal/wal"
@@ -60,10 +59,6 @@ func (l *LSM) handleReq(req *writeReq) {
 	req.errCh <- err
 }
 
-func (l *LSM) genWALFilename(fileIndex int) string {
-	return filepath.Join(l.config.DbDir, fmt.Sprintf(walFilenameFormat, fileIndex))
-}
-
 func (l *LSM) openWAL(fileIndex int) (*os.File, error) {
 	walPath := l.genWALFilename(fileIndex)
 	wal, err := wal.WALOpenFile(walPath)
@@ -73,8 +68,26 @@ func (l *LSM) openWAL(fileIndex int) (*os.File, error) {
 	return wal, nil
 }
 
+func (l *LSM) createMemTable() (*memtable.MemTable, error) {
+	var table *memtable.MemTable
+	fileIndex := int(l.fileIndex.Add(1))
+
+	if l.config.UseWAL {
+		walFile, err := l.openWAL(fileIndex)
+		if err != nil {
+			return nil, err
+		}
+		table = memtable.NewWithWAL(
+			wal.New(walFile), fileIndex, l.config.MaxMemTableLevel)
+	} else {
+		table = memtable.New(fileIndex, l.config.MaxMemTableLevel)
+	}
+
+	return table, nil
+}
+
 func (l *LSM) rotateMemTable() error {
-	walFile, err := l.openWAL(int(l.fileIndex.Add(1)))
+	current, err := l.createMemTable()
 	if err != nil {
 		return err
 	}
@@ -83,7 +96,7 @@ func (l *LSM) rotateMemTable() error {
 	defer l.Unlock()
 
 	l.frozen = append(l.frozen, l.current)
-	l.current = memtable.New(walFile, l.config.MaxMemTableLevel)
+	l.current = current
 
 	return nil
 }

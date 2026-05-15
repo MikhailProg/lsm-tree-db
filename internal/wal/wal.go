@@ -25,6 +25,7 @@ type WALEntry struct {
 
 type WAL struct {
 	file *os.File
+	wb   *bufio.Writer
 	wbuf []byte
 }
 
@@ -37,7 +38,7 @@ func WALOpenFile(filename string) (*os.File, error) {
 }
 
 func New(file *os.File) *WAL {
-	return &WAL{file: file}
+	return &WAL{file: file, wb: bufio.NewWriter(file)}
 }
 
 func (w *WAL) Name() string {
@@ -46,14 +47,6 @@ func (w *WAL) Name() string {
 
 func (w *WAL) Close() error {
 	return w.file.Close()
-}
-
-func (w *WAL) Reset() error {
-	if _, err := w.file.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
-
-	return w.file.Truncate(0)
 }
 
 func (w *WAL) Write(op EntryType, seq uint64, key string, val []byte) error {
@@ -77,11 +70,32 @@ func (w *WAL) Write(op EntryType, seq uint64, key string, val []byte) error {
 	crc := crc32.ChecksumIEEE(buf[4:])
 	binary.LittleEndian.PutUint32(buf[0:4], crc)
 
-	if _, err := w.file.Write(buf); err != nil {
+	if _, err := w.wb.Write(buf); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (w *WAL) Sync() error {
+	if err := w.wb.Flush(); err != nil {
 		return err
 	}
 
 	return w.file.Sync()
+}
+
+func (w *WAL) Reset() error {
+	if _, err := w.file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+
+	if err := w.file.Truncate(0); err != nil {
+		return err
+	}
+
+	w.wb.Reset(w.file)
+	return nil
 }
 
 func (w *WAL) Recover(fn func(WALEntry) error) error {

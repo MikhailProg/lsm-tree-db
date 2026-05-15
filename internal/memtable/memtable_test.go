@@ -13,10 +13,10 @@ const (
 
 func TestMemTable_PutGet(t *testing.T) {
 	tmpDir := t.TempDir()
-	walPath := filepath.Join(tmpDir, "test.wal")
+	walPath := filepath.Join(tmpDir, "0.wal")
 	f, _ := wal.WALOpenFile(walPath)
 
-	mt := New(f, testMaxLevel)
+	mt := NewWithWAL(wal.New(f), 0, testMaxLevel)
 
 	seq := uint64(0)
 
@@ -35,8 +35,8 @@ func TestMemTable_PutGet(t *testing.T) {
 
 func TestMemTable_Delete(t *testing.T) {
 	tmpDir := t.TempDir()
-	f, _ := wal.WALOpenFile(filepath.Join(tmpDir, "delete.wal"))
-	mt := New(f, testMaxLevel)
+	f, _ := wal.WALOpenFile(filepath.Join(tmpDir, "0.wal"))
+	mt := NewWithWAL(wal.New(f), 0, testMaxLevel)
 
 	seq := uint64(0)
 	mt.Put(seq, "key1", []byte("value1"))
@@ -53,8 +53,8 @@ func TestMemTable_Delete(t *testing.T) {
 
 func TestMemTable_TotalSize(t *testing.T) {
 	tmpDir := t.TempDir()
-	f, _ := wal.WALOpenFile(filepath.Join(tmpDir, "size.wal"))
-	mt := New(f, testMaxLevel)
+	f, _ := wal.WALOpenFile(filepath.Join(tmpDir, "0.wal"))
+	mt := NewWithWAL(wal.New(f), 0, testMaxLevel)
 
 	seq := uint64(0)
 	mt.Put(seq, "k", []byte("v")) // 1+1=2
@@ -75,16 +75,23 @@ func TestMemTable_TotalSize(t *testing.T) {
 
 func TestMemTable_Recover(t *testing.T) {
 	tmpDir := t.TempDir()
-	walPath := filepath.Join(tmpDir, "recover.wal")
+	walPath := filepath.Join(tmpDir, "0.wal")
 
 	seq := uint64(42)
 	f1, _ := wal.WALOpenFile(walPath)
-	mt1 := New(f1, testMaxLevel)
+	mt1 := NewWithWAL(wal.New(f1), 0, testMaxLevel)
 	mt1.Put(seq, "recover_me", []byte("data"))
-	f1.Close()
+
+	if err := mt1.Sync(); err != nil {
+		t.Fatalf("failed to sync memtable: %v", err)
+	}
+
+	if err := mt1.Close(); err != nil {
+		t.Fatalf("failed to close memtable: %v", err)
+	}
 
 	f2, _ := wal.WALOpenFile(walPath)
-	mt2 := New(f2, testMaxLevel)
+	mt2 := NewWithWAL(wal.New(f2), 1, testMaxLevel)
 	err := mt2.Recover()
 	if err != nil {
 		t.Fatalf("Recover failed: %v", err)

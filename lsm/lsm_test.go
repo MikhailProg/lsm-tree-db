@@ -107,11 +107,9 @@ func TestLSM_PutGet_SST(t *testing.T) {
 
 	// take flush channel before fill
 	flushDone := lsm.FlushDone()
+	// fill at least the current table
+	// (if UseWAL is false it can fill several memtables)
 	fillTillEvent(lsm, flushDone)
-
-	if len(lsm.frozen) != 0 {
-		t.Fatal("Frozen memtable must be empty")
-	}
 
 	if err := lsm.current.Reset(); err != nil {
 		t.Fatalf("Reset current memtable: %v", err)
@@ -241,15 +239,7 @@ func TestLSM_Compact(t *testing.T) {
 			key := fmt.Sprintf("check%02d", i)
 			lsm.Put(key, []byte(fmt.Sprintf("large_value_%02d", i)))
 		}
-
-		// take flush channel before fill
-		flushDone := lsm.FlushDone()
-		fillTillEvent(lsm, flushDone)
-
-		// since event is postponed we need to drop exceeded keys from the current table
-		if err := lsm.current.Reset(); err != nil {
-			t.Fatalf("Reset current memtable: %v", err)
-		}
+		lsm.rotate()
 	}
 
 	select {
@@ -385,10 +375,9 @@ func TestLSM_ScanRefUnref(t *testing.T) {
 		}
 	}
 
-	// take flush channel before fill
-	flushDone := lsm.FlushDone()
-	// fill current memtable to trigger flush than wait for compaction
-	fillTillEvent(lsm, flushDone)
+	// Rotate the last memtable before compaction
+	lsm.Put("key", []byte("val"))
+	lsm.rotate()
 
 	select {
 	case <-compactDone:
